@@ -49,13 +49,13 @@ TinyUPnP::TinyUPnP(unsigned long timeoutMs = 20000) {
 TinyUPnP::~TinyUPnP() {
 }
 
-void TinyUPnP::addPortMappingConfig(IPAddress ruleIP, int rulePort, String ruleProtocol, int ruleLeaseDuration, String ruleFriendlyName) {
+void TinyUPnP::addPortMappingConfig(IPAddress localIP, int localPort, String ruleProtocol, int ruleLeaseDuration, String ruleFriendlyName, int remotePort) {
     static int index = 0;
     upnpRule *newUpnpRule = new upnpRule();
     newUpnpRule->index = index++;
-    newUpnpRule->internalAddr = (ruleIP == WiFi.localIP()) ? ipNull : ruleIP;  // for automatic IP change handling
-    newUpnpRule->internalPort = rulePort;
-    newUpnpRule->externalPort = rulePort;
+    newUpnpRule->internalAddr = (localIP == WiFi.localIP()) ? ipNull : localIP;  // for automatic IP change handling
+    newUpnpRule->internalPort = localPort;
+    newUpnpRule->externalPort = remotePort ? remotePort : localPort;
     newUpnpRule->leaseDuration = ruleLeaseDuration;
     newUpnpRule->protocol = ruleProtocol;
     newUpnpRule->devFriendlyName = ruleFriendlyName;
@@ -455,18 +455,29 @@ boolean TinyUPnP::applyActionOnSpecificPortMapping(SOAPAction *soapAction, gatew
         }
     }
 
-    strcpy_P(body_tmp, PSTR("<?xml version=\"1.0\"?>\r\n<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n<s:Body>\r\n<u:"));
-    strcat_P(body_tmp, soapAction->name);
-    strcat_P(body_tmp, PSTR(" xmlns:u=\""));
-    strcat_P(body_tmp, deviceInfo->serviceTypeName.c_str());
-    strcat_P(body_tmp, PSTR("\">\r\n<NewRemoteHost></NewRemoteHost>\r\n<NewExternalPort>"));
-    sprintf(integer_string, "%d", rule_ptr->internalPort);
-    strcat_P(body_tmp, integer_string);
-    strcat_P(body_tmp, PSTR("</NewExternalPort>\r\n<NewProtocol>"));
-    strcat_P(body_tmp, rule_ptr->protocol.c_str());
-    strcat_P(body_tmp, PSTR("</NewProtocol>\r\n</u:"));
-    strcat_P(body_tmp, soapAction->name);
-    strcat_P(body_tmp, PSTR(">\r\n</s:Body>\r\n</s:Envelope>\r\n"));
+    static const char rule_pattern[] PROGMEM = 
+    "<?xml version=\"1.0\"?>"
+    "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
+    "<s:Body>"
+    "<u:%s xmlns:u=\"%s\">"
+    "<NewRemoteHost></NewRemoteHost>"
+    "<NewInternalPort>%d</NewInternalPort>"
+    "<NewExternalPort>%d</NewExternalPort>"
+    "<NewProtocol>%s</NewProtocol>"
+    "</u:%s>"
+    "</s:Body>"
+    "</s:Envelope>";
+
+    sprintf_P(
+        body_tmp, 
+        rule_pattern, 
+        soapAction->name,
+        deviceInfo->serviceTypeName.c_str(),
+        rule_ptr->internalPort,
+        rule_ptr->externalPort,
+        rule_ptr->protocol.c_str(),
+        deviceInfo->serviceTypeName.c_str()
+    );
 
     sprintf(integer_string, "%d", strlen(body_tmp));
 
@@ -961,25 +972,36 @@ boolean TinyUPnP::addPortMappingEntry(gatewayInfo *deviceInfo, upnpRule *rule_pt
     debugPrint(deviceInfo->serviceTypeName);
     debugPrintln(F("]"));
 
-    strcpy_P(body_tmp, PSTR("<?xml version=\"1.0\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body><u:AddPortMapping xmlns:u=\""));
-    strcat_P(body_tmp, deviceInfo->serviceTypeName.c_str());
-    strcat_P(body_tmp, PSTR("\"><NewRemoteHost></NewRemoteHost><NewExternalPort>"));
-    sprintf(integer_string, "%d", rule_ptr->internalPort);
-    strcat_P(body_tmp, integer_string);
-    strcat_P(body_tmp, PSTR("</NewExternalPort><NewProtocol>"));
-    strcat_P(body_tmp, rule_ptr->protocol.c_str());
-    strcat_P(body_tmp, PSTR("</NewProtocol><NewInternalPort>"));
-    sprintf(integer_string, "%d", rule_ptr->internalPort);
-    strcat_P(body_tmp, integer_string);
-    strcat_P(body_tmp, PSTR("</NewInternalPort><NewInternalClient>"));
+    static const char add_pattern[] PROGMEM = 
+        "<?xml version=\"1.0\"?>"
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
+        "<s:Body>"
+        "<u:AddPortMapping xmlns:u=\"%s\">"
+        "<NewRemoteHost></NewRemoteHost>"
+        "<NewInternalPort>%d</NewInternalPort>"
+        "<NewExternalPort>%d</NewExternalPort>"
+        "<NewProtocol>%s</NewProtocol>"
+        "<NewInternalClient>%s</NewInternalClient>"
+        "<NewEnabled>1</NewEnabled>"
+        "<NewPortMappingDescription>%d</NewPortMappingDescription>"
+        "<NewLeaseDuration>%d</NewLeaseDuration>"
+        "</u:%s>"
+        "</s:Body>"
+        "</s:Envelope>";
+
     IPAddress ipAddress = (rule_ptr->internalAddr == ipNull) ? WiFi.localIP() : rule_ptr->internalAddr;
-    strcat_P(body_tmp, ipAddress.toString().c_str());
-    strcat_P(body_tmp, PSTR("</NewInternalClient><NewEnabled>1</NewEnabled><NewPortMappingDescription>"));
-    strcat_P(body_tmp, rule_ptr->devFriendlyName.c_str());
-    strcat_P(body_tmp, PSTR("</NewPortMappingDescription><NewLeaseDuration>"));
-    sprintf(integer_string, "%d", rule_ptr->leaseDuration);
-    strcat_P(body_tmp, integer_string);
-    strcat_P(body_tmp, PSTR("</NewLeaseDuration></u:AddPortMapping></s:Body></s:Envelope>"));
+
+    sprintf_P(
+        body_tmp,
+        add_pattern,
+        deviceInfo->serviceTypeName.c_str(),
+        rule_ptr->internalPort,                  // NewInternalPort
+        rule_ptr->externalPort,                  // NewExternalPort
+        rule_ptr->protocol.c_str(),              // NewProtocol
+        ipAddress.toString().c_str(),            // NewInternalClient
+        rule_ptr->devFriendlyName.c_str(),       // NewPortMappingDescription
+        rule_ptr->leaseDuration                  // NewLeaseDuration
+    );
 
     sprintf(integer_string, "%d", strlen(body_tmp));
     

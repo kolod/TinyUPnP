@@ -128,7 +128,7 @@ class TinyUPnP
         ~TinyUPnP();
         // when the ruleIP is set to the current device IP, the IP of the rule will change if the device changes its IP
         // this makes sure the traffic will be directed to the device even if the IP chnages
-        void addPortMappingConfig(IPAddress ruleIP /* can be NULL */, int rulePort, String ruleProtocol, int ruleLeaseDuration, String ruleFriendlyName);
+        void addPortMappingConfig(IPAddress localIP /* can be NULL */, int localPort, String ruleProtocol, int ruleLeaseDuration, String ruleFriendlyName, int remotePort = 0);
         portMappingResult commitPortMappings();
         portMappingResult updatePortMappings(unsigned long intervalMs, callback_function fallback = NULL /* optional */);
         boolean printAllPortMappings();
